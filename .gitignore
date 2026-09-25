@@ -1,0 +1,10 @@
+/target
+/models/*.onnx
+/models/*.bin
+*.log
+/models/whisper-small-npu/decoder_model.onnx
+/models/whisper-small-npu/encoder_model.onnx
+/models/whisper-small-npu/ggml-small-encoder-vitisai.rai
+/.idea/modules.xml
+/.idea/whisper-npu.iml
+/.idea/vcs.xml

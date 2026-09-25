@@ -1,0 +1,22 @@
+[Unit]
+Description=Whisper NPU Dictation Daemon
+After=network.target sound.target
+
+[Service]
+Type=simple
+User=mallumo
+Group=mallumo
+WorkingDirectory=/home/mallumo/projects/ai-wd/whisper-npu
+RuntimeDirectory=whisper-npu
+RuntimeDirectoryMode=0755
+Environment=ORT_LIB_LOCATION=/opt/onnxruntime/lib
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=YDOTOOL_SOCKET=/tmp/.ydotool_socket
+LimitMEMLOCK=infinity
+ExecStart=/home/mallumo/projects/ai-wd/whisper-npu/scripts/run_daemon.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
