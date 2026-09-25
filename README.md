@@ -3,7 +3,9 @@
 > **Fast, private, offline voice dictation overlay for Linux (Wayland & GNOME) powered by ONNX Runtime, Sherpa-ONNX, and Rust.**
 
 <p align="center">
-  <img src="assets/app_screenshot.png" alt="Whisper Dictation App Screenshot" width="600" />
+  <img src="assets/demo.gif" alt="Whisper Dictation Live Demo" width="720" />
+  <br>
+  <em>Live dictation, LLM fix sidecar, and automated Wayland paste. (<a href="assets/demo.webm">Watch High-Res WebM Video</a> | <a href="assets/app_screenshot.png">View Screenshot</a>)</em>
 </p>
 
 Whisper-NPU provides a lightning-fast floating voice dictation overlay that transcribes your speech in real-time and automatically pastes the text directly into whichever application you are using—whether it's VS Code, a web browser, terminal, or chat client.
@@ -183,6 +185,10 @@ Run both daemon and client together using the top-level launcher:
 ---
 
 ## 🎯 How to Use
+
+<p align="center">
+  <img src="assets/app_screenshot.png" alt="Whisper Dictation UI" width="580" />
+</p>
 
 1. **Activate the Overlay:** Press your custom shortcut (or run `./scripts/run_client.sh`).
 2. **Speak Naturally:** Dictate your thoughts. Speech is transcribed and displayed live in
