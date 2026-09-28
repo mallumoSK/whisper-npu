@@ -1,4 +1,5 @@
 use anyhow::Result;
+use protocol::strip_trailing_you;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::info;
@@ -7,6 +8,7 @@ pub struct WhisperEngine {
     cli_path: PathBuf,
     model_path: PathBuf,
     language: String,
+    #[allow(dead_code)]
     gpu_device: u32,
 }
 
@@ -122,7 +124,8 @@ pub fn clean_whisper_text(text: &str) -> String {
         }
     }
 
-    cleaned.split_whitespace().collect::<Vec<_>>().join(" ").trim().to_string()
+    let normalized = cleaned.split_whitespace().collect::<Vec<_>>().join(" ").trim().to_string();
+    strip_trailing_you(&normalized)
 }
 
 #[cfg(test)]
@@ -145,6 +148,14 @@ mod tests {
     fn test_clean_text() {
         assert_eq!(
             clean_whisper_text("[music] And so (applause) my fellow Americans"),
+            "And so my fellow Americans"
+        );
+        assert_eq!(
+            clean_whisper_text("[BLANK_AUDIO] you."),
+            ""
+        );
+        assert_eq!(
+            clean_whisper_text("And so my fellow Americans you."),
             "And so my fellow Americans"
         );
     }

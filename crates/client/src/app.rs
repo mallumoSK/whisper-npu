@@ -20,7 +20,7 @@ use eframe::egui::{
     self, vec2, Align, CentralPanel, Color32, CursorIcon, Frame, Key, Layout, Margin, RichText,
     Sense, Stroke, TextEdit,
 };
-use protocol::{ClientCommand, DaemonEvent, DaemonState};
+use protocol::{strip_trailing_you, ClientCommand, DaemonEvent, DaemonState};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use tracing::info;
 
@@ -279,6 +279,7 @@ impl eframe::App for WhisperClientApp {
                     self.state = data;
                 }
                 DaemonEvent::PartialTranscript { data } => {
+                    let data = strip_trailing_you(&data);
                     match self.stt_target {
                         SttTarget::FixPrompt => {
                             if self.fix_window.is_open && self.fix_window.phase == FixPhase::Prompting {
@@ -294,6 +295,7 @@ impl eframe::App for WhisperClientApp {
                     }
                 }
                 DaemonEvent::FinalTranscript { data } => {
+                    let data = strip_trailing_you(&data);
                     match self.stt_target {
                         SttTarget::FixPrompt => {
                             if self.fix_window.is_open && self.fix_window.phase == FixPhase::Prompting {

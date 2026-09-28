@@ -45,6 +45,7 @@ fn main() -> eframe::Result<()> {
     let ipc_handle = start_ipc_client(None);
 
     let native_options = eframe::NativeOptions {
+        renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default()
             .with_app_id("whisper-dictation")
             .with_inner_size([630.0, 520.0])

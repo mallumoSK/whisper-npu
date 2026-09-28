@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 protocol = { path = "../protocol" }
-eframe = { version = "0.30", default-features = true, features = ["wayland", "wgpu"] }
+eframe = { version = "0.30", default-features = true, features = ["wayland", "glow"] }
 tokio = { version = "1.43", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 serde = { version = "1.0", features = ["derive"] }

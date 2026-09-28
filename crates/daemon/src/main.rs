@@ -4,7 +4,7 @@ mod server;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use protocol::{ClientCommand, DaemonEvent, DaemonState, DEFAULT_SOCKET_PATH};
+use protocol::{strip_trailing_you, ClientCommand, DaemonEvent, DaemonState, DEFAULT_SOCKET_PATH};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -122,17 +122,19 @@ async fn main() -> Result<()> {
             Some(res) = live_rx.recv() => {
                 let state = *current_state.lock().await;
                 if state == DaemonState::Listening && res.generation == current_generation {
-                    if res.text != last_live_text {
-                        last_live_text = res.text.clone();
+                    let cleaned_text = strip_trailing_you(&res.text);
+                    if cleaned_text != last_live_text {
+                        last_live_text = cleaned_text.clone();
                         let full_display = if accumulated_text.is_empty() {
-                            res.text
-                        } else if res.text.is_empty() {
+                            cleaned_text
+                        } else if cleaned_text.is_empty() {
                             accumulated_text.clone()
                         } else {
-                            format!("{}\n{}", accumulated_text, res.text)
+                            format!("{}\n{}", accumulated_text, cleaned_text)
                         };
+                        let display_data = strip_trailing_you(&full_display);
                         let _ = event_tx.send(DaemonEvent::PartialTranscript {
-                            data: full_display,
+                            data: display_data,
                         });
                     }
                 }
@@ -182,6 +184,7 @@ async fn main() -> Result<()> {
                                 t
                             }).await.unwrap_or_default();
 
+                            let final_text = strip_trailing_you(&final_text);
                             if !final_text.is_empty() {
                                 if !accumulated_text.is_empty() {
                                     accumulated_text.push('\n');
@@ -190,6 +193,7 @@ async fn main() -> Result<()> {
                             }
                             last_live_text.clear();
 
+                            accumulated_text = strip_trailing_you(&accumulated_text);
                             let _ = event_tx.send(DaemonEvent::FinalTranscript {
                                 data: accumulated_text.clone(),
                             });
