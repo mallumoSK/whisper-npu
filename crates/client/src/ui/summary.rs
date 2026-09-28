@@ -49,19 +49,28 @@ impl SummaryState {
             .rounding(20.0)
             .inner_margin(14.0)
             .show(ui, |ui| {
-                // Header Row: [Icon] "Markdown Summary" | Status / Actions
+                // Header Row: [Icon] "Executive Summary" | Status / Actions
                 ui.horizontal(|ui| {
-                    let (icon_rect, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
-                    ui.painter().circle_filled(icon_rect.center(), 12.0, CHIP_BG);
-                    paint_summary_icon(ui.painter(), icon_rect.center(), PRIMARY);
+                    let title_resp = ui.horizontal(|ui| {
+                        let (icon_rect, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
+                        ui.painter().circle_filled(icon_rect.center(), 12.0, CHIP_BG);
+                        paint_summary_icon(ui.painter(), icon_rect.center(), PRIMARY);
 
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new("Markdown Summary")
-                            .color(ON_SURFACE)
-                            .strong()
-                            .size(15.0),
-                    );
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new("Executive Summary")
+                                .color(ON_SURFACE)
+                                .strong()
+                                .size(15.0),
+                        );
+                    }).response;
+                    let title_interact = title_resp.interact(Sense::click());
+                    if title_interact.hovered() && !self.is_generating {
+                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                    }
+                    if title_interact.clicked() && !self.is_generating {
+                        triggered_action = Some(SummaryAction::Update);
+                    }
 
                     // Show status if generating or set
                     if let Some(ref st) = self.status_text {
@@ -207,14 +216,21 @@ impl SummaryState {
                                             );
                                         });
                                     } else {
-                                        ui.vertical_centered(|ui| {
+                                        let ph_resp = ui.vertical_centered(|ui| {
                                             ui.add_space(40.0);
                                             ui.label(
-                                                RichText::new("No summary yet. Dictate your thoughts and click Summary or Ctrl+Enter.")
+                                                RichText::new("No summary yet. Dictate your thoughts and click here, click Summary, or press CTRL.")
                                                     .color(ON_SURFACE_DIM)
                                                     .size(13.0),
                                             );
-                                        });
+                                        }).response;
+                                        let ph_interact = ph_resp.interact(Sense::click());
+                                        if ph_interact.hovered() && !self.is_generating {
+                                            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                                        }
+                                        if ph_interact.clicked() && !self.is_generating {
+                                            triggered_action = Some(SummaryAction::Update);
+                                        }
                                     }
                                 } else {
                                     render_markdown_content(ui, &self.markdown_text);

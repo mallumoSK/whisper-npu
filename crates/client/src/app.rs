@@ -151,14 +151,40 @@ impl WhisperClientApp {
         if self.summary.is_expanded {
             info!("Collapsing Summary view");
             self.summary.is_expanded = false;
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(690.0, 520.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(800.0, 520.0)));
         } else {
-            info!("Expanding Summary view vertically");
-            self.summary.is_expanded = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(690.0, 860.0)));
-            if self.summary.markdown_text.is_empty() && !self.text.trim().is_empty() {
-                self.trigger_summary();
+            self.execute_summary_operational_sequence(ctx);
+        }
+    }
+
+    /// Executes the Executive Summary operational sequence:
+    /// 1. Process Interruption: If recognition is running, executes a master recognition stop command.
+    /// 2. Expands the Executive Summary window to minimum 800px width.
+    /// 3. Workflow Execution: Initiates the LLaMA process.
+    /// 4. Output: Displays status and resulting Markdown data.
+    fn execute_summary_operational_sequence(&mut self, ctx: &egui::Context) {
+        // 1. Process Interruption (Master Recognition Stop)
+        if self.state == DaemonState::Listening {
+            info!("Master recognition stop: interrupting active recognition before initiating LLaMA summary");
+            let _ = self.ipc.cmd_tx.send(ClientCommand::PauseListening);
+            self.state = DaemonState::Paused;
+            if self.is_editing {
+                self.was_recording_before_edit = false;
             }
+        }
+
+        // 2. Expand window if not already expanded (min width 800px)
+        if !self.summary.is_expanded {
+            info!("Expanding Summary view vertically with 800px width");
+            self.summary.is_expanded = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(800.0, 860.0)));
+        }
+
+        // 3. Workflow Execution: initiate LLaMA process
+        if self.summary.markdown_text.is_empty() {
+            self.trigger_summary();
+        } else {
+            self.trigger_summary_update();
         }
     }
 
@@ -513,11 +539,11 @@ impl eframe::App for WhisperClientApp {
         }
 
         // 4. Handle Keyboard Shortcuts
+        let mut do_execute_summary_sequence = false;
         let mut do_stop_and_paste = false;
         let mut do_cancel_and_exit = false;
         let mut do_toggle_pause = false;
         let mut do_toggle_edit = false;
-        let mut do_trigger_summary_update = false;
         let mut do_collapse_summary = false;
 
         let ctrl_clicked = ctx.input(|i| (i.modifiers.ctrl || i.modifiers.command) && !self.prev_ctrl_pressed);
@@ -544,11 +570,9 @@ impl eframe::App for WhisperClientApp {
                 }
             } else if self.summary.is_expanded {
                 // In Summary expanded mode:
-                // If user pressed Ctrl alone (or Ctrl+Enter) to update summary:
-                if (ctrl_clicked && !self.text.trim().is_empty())
-                    || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(Key::Enter))
-                {
-                    do_trigger_summary_update = true;
+                // Dedicated CTRL shortcut (or Ctrl+Enter) triggers executive summary operational sequence
+                if ctrl_clicked || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(Key::Enter)) {
+                    do_execute_summary_sequence = true;
                 } else if i.key_pressed(Key::Enter) {
                     do_stop_and_paste = true;
                 } else if i.key_pressed(Key::Space) {
@@ -557,8 +581,11 @@ impl eframe::App for WhisperClientApp {
                     do_collapse_summary = true;
                 }
             } else {
-                // In navigational mode:
-                if i.key_pressed(Key::Space) {
+                // In normal navigation mode:
+                // Dedicated CTRL shortcut accesses Executive Summary and executes operational sequence
+                if ctrl_clicked || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(Key::Enter)) {
+                    do_execute_summary_sequence = true;
+                } else if i.key_pressed(Key::Space) {
                     do_toggle_pause = true;
                 } else if i.key_pressed(Key::Enter) {
                     do_stop_and_paste = true;
@@ -568,8 +595,8 @@ impl eframe::App for WhisperClientApp {
             }
         });
 
-        if do_trigger_summary_update {
-            self.trigger_summary_update();
+        if do_execute_summary_sequence {
+            self.execute_summary_operational_sequence(ctx);
         }
         if do_collapse_summary {
             self.toggle_summary(ctx);
@@ -761,30 +788,29 @@ impl eframe::App for WhisperClientApp {
                                 }
                             }
 
-                            // 5. Ctrl Update Pill (when Summary is expanded)
-                            if self.summary.is_expanded {
-                                ui.add_space(4.0);
-                                let update_pill = Frame::none()
-                                    .fill(CHIP_BG)
-                                    .stroke(Stroke::new(1.0, OUTLINE))
-                                    .rounding(16.0)
-                                    .inner_margin(Margin::symmetric(10.0, 6.0));
-                                let update_resp = update_pill.show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
-                                        paint_summary_icon(ui.painter(), r.center(), KEY_PILL_TEXT);
-                                        ui.add_space(2.0);
-                                        ui.label(RichText::new("Ctrl").color(KEY_PILL_TEXT).strong().size(12.0));
-                                        ui.label(RichText::new("Update Summary").color(ON_SURFACE_DIM).size(12.0));
-                                    });
-                                }).response;
-                                let update_interact = update_resp.interact(Sense::click());
-                                if update_interact.hovered() && !self.summary.is_generating {
-                                    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-                                }
-                                if update_interact.clicked() && !self.summary.is_generating {
-                                    self.trigger_summary_update();
-                                }
+                            // 5. Ctrl Summary Pill (Accessible in both normal and expanded mode)
+                            ui.add_space(4.0);
+                            let ctrl_label = if self.summary.is_expanded { "Update Summary" } else { "Summary" };
+                            let update_pill = Frame::none()
+                                .fill(CHIP_BG)
+                                .stroke(Stroke::new(1.0, OUTLINE))
+                                .rounding(16.0)
+                                .inner_margin(Margin::symmetric(10.0, 6.0));
+                            let update_resp = update_pill.show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                                    paint_summary_icon(ui.painter(), r.center(), KEY_PILL_TEXT);
+                                    ui.add_space(2.0);
+                                    ui.label(RichText::new("Ctrl").color(KEY_PILL_TEXT).strong().size(12.0));
+                                    ui.label(RichText::new(ctrl_label).color(ON_SURFACE_DIM).size(12.0));
+                                });
+                            }).response;
+                            let update_interact = update_resp.interact(Sense::click());
+                            if update_interact.hovered() && !self.summary.is_generating {
+                                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                            }
+                            if update_interact.clicked() && !self.summary.is_generating {
+                                self.execute_summary_operational_sequence(ui.ctx());
                             }
                         });
                     });
@@ -834,7 +860,7 @@ impl eframe::App for WhisperClientApp {
                     ui.allocate_ui(vec2(ui.available_width(), summary_card_height), |ui| {
                         if let Some(action) = self.summary.show(ui, !self.text.trim().is_empty()) {
                             match action {
-                                SummaryAction::Update => self.trigger_summary_update(),
+                                SummaryAction::Update => self.execute_summary_operational_sequence(ctx),
                                 SummaryAction::Copy => {
                                     let md = self.summary.markdown_text.clone();
                                     let _ = copy_to_clipboard(&md);
@@ -926,7 +952,7 @@ impl eframe::App for WhisperClientApp {
                         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
                     }
                     if sum_interact.clicked() {
-                        self.toggle_summary(ui.ctx());
+                        self.execute_summary_operational_sequence(ui.ctx());
                     }
 
                     ui.add_space(6.0);
