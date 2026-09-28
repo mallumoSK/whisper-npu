@@ -24,6 +24,15 @@ pub fn paint_space_icon(painter: &Painter, c: Pos2, color: Color32) {
     painter.line_segment([pos2(c.x + 4.5, c.y + 2.5), pos2(c.x + 4.5, c.y - 1.5)], stroke);
 }
 
+pub fn paint_shift_icon(painter: &Painter, c: Pos2, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    // Upward arrow head
+    painter.line_segment([pos2(c.x - 4.0, c.y - 1.0), pos2(c.x, c.y - 5.0)], stroke);
+    painter.line_segment([pos2(c.x + 4.0, c.y - 1.0), pos2(c.x, c.y - 5.0)], stroke);
+    // Vertical stem
+    painter.line_segment([pos2(c.x, c.y - 5.0), pos2(c.x, c.y + 4.5)], stroke);
+}
+
 pub fn paint_esc_icon(painter: &Painter, c: Pos2, color: Color32) {
     let stroke = Stroke::new(1.5, color);
     painter.circle_stroke(c, 5.0, stroke);

@@ -8,8 +8,8 @@ use crate::paste::copy_to_clipboard;
 use crate::ui::fix_window::{FixAction, FixPhase, FixWindowState};
 use crate::ui::icons::{
     paint_edit_icon, paint_enter_icon, paint_esc_icon, paint_paste_icon, paint_pause_icon,
-    paint_play_icon, paint_space_icon, paint_summary_icon, paint_trash_icon, paint_wand_icon,
-    paint_waveform_icon,
+    paint_play_icon, paint_shift_icon, paint_space_icon, paint_summary_icon, paint_trash_icon,
+    paint_wand_icon, paint_waveform_icon,
 };
 use crate::ui::soundwave::paint_soundwave;
 use crate::ui::summary::{SummaryAction, SummaryState};
@@ -50,6 +50,7 @@ pub struct WhisperClientApp {
     summary_tx: Sender<FixProgress>,
     summary_rx: Receiver<FixProgress>,
     prev_ctrl_pressed: bool,
+    prev_shift_pressed: bool,
 }
 
 impl WhisperClientApp {
@@ -71,6 +72,7 @@ impl WhisperClientApp {
             summary_tx,
             summary_rx,
             prev_ctrl_pressed: false,
+            prev_shift_pressed: false,
         }
     }
 
@@ -545,9 +547,13 @@ impl eframe::App for WhisperClientApp {
         let mut do_toggle_pause = false;
         let mut do_toggle_edit = false;
         let mut do_collapse_summary = false;
+        let mut do_clear_text = false;
 
         let ctrl_clicked = ctx.input(|i| (i.modifiers.ctrl || i.modifiers.command) && !self.prev_ctrl_pressed);
         self.prev_ctrl_pressed = ctx.input(|i| i.modifiers.ctrl || i.modifiers.command);
+
+        let shift_clicked = ctx.input(|i| i.modifiers.shift && !i.modifiers.ctrl && !i.modifiers.command && !i.modifiers.alt && !self.prev_shift_pressed);
+        self.prev_shift_pressed = ctx.input(|i| i.modifiers.shift);
 
         ctx.input(|i| {
             if self.fix_window.is_open {
@@ -565,13 +571,17 @@ impl eframe::App for WhisperClientApp {
                 }
             } else if self.is_editing {
                 // In editing mode, Escape acts as Done and exits back to normal mode
+                // Note: Shift is intentionally NOT used for Clear during editing, so user can type uppercase letters
                 if i.key_pressed(Key::Escape) {
                     do_toggle_edit = true;
                 }
             } else if self.summary.is_expanded {
                 // In Summary expanded mode:
+                // Dedicated Shift shortcut acts identically to clicking Clear
+                if shift_clicked {
+                    do_clear_text = true;
                 // Dedicated CTRL shortcut (or Ctrl+Enter) triggers executive summary operational sequence
-                if ctrl_clicked || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(Key::Enter)) {
+                } else if ctrl_clicked || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(Key::Enter)) {
                     do_execute_summary_sequence = true;
                 } else if i.key_pressed(Key::Enter) {
                     do_stop_and_paste = true;
@@ -582,8 +592,11 @@ impl eframe::App for WhisperClientApp {
                 }
             } else {
                 // In normal navigation mode:
+                // Dedicated Shift shortcut acts identically to clicking Clear
+                if shift_clicked {
+                    do_clear_text = true;
                 // Dedicated CTRL shortcut accesses Executive Summary and executes operational sequence
-                if ctrl_clicked || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(Key::Enter)) {
+                } else if ctrl_clicked || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(Key::Enter)) {
                     do_execute_summary_sequence = true;
                 } else if i.key_pressed(Key::Space) {
                     do_toggle_pause = true;
@@ -595,6 +608,9 @@ impl eframe::App for WhisperClientApp {
             }
         });
 
+        if do_clear_text {
+            self.clear_text();
+        }
         if do_execute_summary_sequence {
             self.execute_summary_operational_sequence(ctx);
         }
@@ -760,7 +776,32 @@ impl eframe::App for WhisperClientApp {
 
                             ui.add_space(4.0);
 
-                            // 4. Esc Cancel Pill: [⎋ Esc Cancel / Collapse]
+                            // 4. Shift Clear Pill: [⇧ Shift Clear]
+                            let clear_pill = Frame::none()
+                                .fill(CHIP_BG)
+                                .stroke(Stroke::new(1.0, OUTLINE))
+                                .rounding(16.0)
+                                .inner_margin(Margin::symmetric(10.0, 6.0));
+                            let clear_pill_resp = clear_pill.show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                                    paint_shift_icon(ui.painter(), r.center(), KEY_PILL_TEXT);
+                                    ui.add_space(2.0);
+                                    ui.label(RichText::new("Shift").color(KEY_PILL_TEXT).strong().size(12.0));
+                                    ui.label(RichText::new("Clear").color(ON_SURFACE_DIM).size(12.0));
+                                });
+                            }).response;
+                            let clear_pill_interact = clear_pill_resp.interact(Sense::click());
+                            if clear_pill_interact.hovered() {
+                                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                            }
+                            if clear_pill_interact.clicked() {
+                                self.clear_text();
+                            }
+
+                            ui.add_space(4.0);
+
+                            // 5. Esc Cancel Pill: [⎋ Esc Cancel / Collapse]
                             let esc_label = if self.summary.is_expanded { "Collapse" } else { "Cancel" };
                             let esc_pill = Frame::none()
                                 .fill(CHIP_BG)
@@ -894,6 +935,7 @@ impl eframe::App for WhisperClientApp {
                             let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
                             paint_trash_icon(ui.painter(), r.center(), ON_SURFACE_DIM);
                             ui.add_space(3.0);
+                            ui.label(RichText::new("Shift").size(11.0).strong().color(KEY_PILL_TEXT));
                             ui.label(RichText::new("Clear").size(13.0).color(ON_SURFACE));
                         });
                     }).response;
