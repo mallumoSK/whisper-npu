@@ -204,11 +204,21 @@ async fn main() -> Result<()> {
                         });
                     }
                     ClientCommand::ClearBuffer => {
+                        let state = *current_state.lock().await;
                         accumulated_text.clear();
                         last_live_text.clear();
                         current_generation += 1;
-                        let _ = std::fs::remove_file(audio::RECORDING_WAV_PATH);
-                        let _ = std::fs::remove_file(audio::RECORDING_WAV_COPY);
+                        if state == DaemonState::Listening {
+                            recorder.stop();
+                            let _ = std::fs::remove_file(audio::RECORDING_WAV_PATH);
+                            let _ = std::fs::remove_file(audio::RECORDING_WAV_COPY);
+                            if let Err(e) = recorder.start() {
+                                error!("Failed to restart recorder on ClearBuffer: {:?}", e);
+                            }
+                        } else {
+                            let _ = std::fs::remove_file(audio::RECORDING_WAV_PATH);
+                            let _ = std::fs::remove_file(audio::RECORDING_WAV_COPY);
+                        }
 
                         let _ = event_tx.send(DaemonEvent::PartialTranscript {
                             data: String::new(),

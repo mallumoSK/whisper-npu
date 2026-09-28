@@ -108,6 +108,26 @@ impl WhisperClientApp {
         }
     }
 
+    fn clear_text(&mut self) {
+        info!("Clear clicked: clearing text and resuming recognition");
+        self.text.clear();
+        let _ = self.ipc.cmd_tx.send(ClientCommand::ClearBuffer);
+
+        if self.is_editing {
+            self.is_editing = false;
+            self.was_recording_before_edit = false;
+        }
+
+        if self.state != DaemonState::Listening {
+            let _ = self.ipc.cmd_tx.send(ClientCommand::ResumeListening);
+            self.state = DaemonState::Listening;
+        }
+
+        if !self.fix_window.is_open {
+            self.stt_target = SttTarget::MainText;
+        }
+    }
+
     fn stop_llama_service_async() {
         std::thread::spawn(|| {
             let _ = stop_systemctl_service(DEFAULT_LLAMA_SERVICE);
@@ -610,8 +630,7 @@ impl eframe::App for WhisperClientApp {
                         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
                     }
                     if clear_interact.clicked() {
-                        self.text.clear();
-                        let _ = self.ipc.cmd_tx.send(ClientCommand::ClearBuffer);
+                        self.clear_text();
                     }
 
                     ui.add_space(6.0);
