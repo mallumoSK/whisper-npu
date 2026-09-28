@@ -100,3 +100,26 @@ pub fn paint_refresh_icon(painter: &Painter, c: Pos2, color: Color32) {
     painter.circle_stroke(c, 4.5, stroke);
     painter.line_segment([pos2(c.x + 2.0, c.y - 5.0), pos2(c.x + 4.5, c.y - 2.5)], stroke);
 }
+
+pub fn paint_summary_icon(painter: &Painter, c: Pos2, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let doc_rect = Rect::from_min_max(pos2(c.x - 5.0, c.y - 6.0), pos2(c.x + 5.0, c.y + 6.0));
+    painter.rect_stroke(doc_rect, Rounding::same(1.5), stroke);
+    let line_stroke = Stroke::new(1.3, color);
+    // Bullet 1 + line
+    painter.circle_filled(pos2(c.x - 2.5, c.y - 2.5), 0.9, color);
+    painter.line_segment([pos2(c.x - 0.5, c.y - 2.5), pos2(c.x + 3.0, c.y - 2.5)], line_stroke);
+    // Bullet 2 + line
+    painter.circle_filled(pos2(c.x - 2.5, c.y + 1.0), 0.9, color);
+    painter.line_segment([pos2(c.x - 0.5, c.y + 1.0), pos2(c.x + 3.0, c.y + 1.0)], line_stroke);
+}
+
+pub fn paint_copy_icon(painter: &Painter, c: Pos2, color: Color32) {
+    let stroke = Stroke::new(1.5, color);
+    // Back rectangle
+    let back_rect = Rect::from_min_max(pos2(c.x - 3.0, c.y - 5.0), pos2(c.x + 5.0, c.y + 3.0));
+    painter.rect_stroke(back_rect, Rounding::same(1.5), stroke);
+    // Front rectangle
+    let front_rect = Rect::from_min_max(pos2(c.x - 5.0, c.y - 2.5), pos2(c.x + 2.5, c.y + 5.5));
+    painter.rect_stroke(front_rect, Rounding::same(1.5), stroke);
+}

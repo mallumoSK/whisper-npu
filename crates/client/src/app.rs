@@ -1,4 +1,5 @@
 use crate::fix::{
+    request_summary_update_with_progress, request_summary_with_progress,
     request_text_fix_with_progress, stop_systemctl_service, FixProgress, DEFAULT_LLAMA_API_URL,
     DEFAULT_LLAMA_HEALTH_URL, DEFAULT_LLAMA_SERVICE,
 };
@@ -7,9 +8,11 @@ use crate::paste::copy_to_clipboard;
 use crate::ui::fix_window::{FixAction, FixPhase, FixWindowState};
 use crate::ui::icons::{
     paint_edit_icon, paint_enter_icon, paint_esc_icon, paint_paste_icon, paint_pause_icon,
-    paint_play_icon, paint_space_icon, paint_trash_icon, paint_wand_icon, paint_waveform_icon,
+    paint_play_icon, paint_space_icon, paint_summary_icon, paint_trash_icon, paint_wand_icon,
+    paint_waveform_icon,
 };
 use crate::ui::soundwave::paint_soundwave;
+use crate::ui::summary::{SummaryAction, SummaryState};
 use crate::ui::theme::{
     apply_m3_style, CHIP_BG, ERROR_TEXT, KEY_PILL_TEXT, ON_SURFACE, ON_SURFACE_DIM, OUTLINE,
     PAUSED_BG, PAUSED_STROKE, PAUSED_TEXT, PRIMARY, PRIMARY_BUTTON_BG, PRIMARY_BUTTON_TEXT,
@@ -22,6 +25,7 @@ use eframe::egui::{
 };
 use protocol::{strip_trailing_you, ClientCommand, DaemonEvent, DaemonState};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::time::Instant;
 use tracing::info;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,11 +46,16 @@ pub struct WhisperClientApp {
     status_error: Option<String>,
     fix_tx: Sender<FixProgress>,
     fix_rx: Receiver<FixProgress>,
+    summary: SummaryState,
+    summary_tx: Sender<FixProgress>,
+    summary_rx: Receiver<FixProgress>,
+    prev_ctrl_pressed: bool,
 }
 
 impl WhisperClientApp {
     pub fn new(ipc: ClientIpcHandle) -> Self {
         let (fix_tx, fix_rx) = channel();
+        let (summary_tx, summary_rx) = channel();
         Self {
             ipc,
             state: DaemonState::Listening,
@@ -58,6 +67,10 @@ impl WhisperClientApp {
             status_error: None,
             fix_tx,
             fix_rx,
+            summary: SummaryState::default(),
+            summary_tx,
+            summary_rx,
+            prev_ctrl_pressed: false,
         }
     }
 
@@ -134,9 +147,134 @@ impl WhisperClientApp {
         });
     }
 
+    fn toggle_summary(&mut self, ctx: &egui::Context) {
+        if self.summary.is_expanded {
+            info!("Collapsing Summary view");
+            self.summary.is_expanded = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(630.0, 520.0)));
+        } else {
+            info!("Expanding Summary view vertically");
+            self.summary.is_expanded = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(630.0, 860.0)));
+            if self.summary.markdown_text.is_empty() && !self.text.trim().is_empty() {
+                self.trigger_summary();
+            }
+        }
+    }
+
+    fn trigger_summary(&mut self) {
+        if self.summary.is_generating {
+            return;
+        }
+
+        let speech_text = self.text.clone();
+        if speech_text.trim().is_empty() {
+            self.summary.status_text = Some("No speech to summarize. Dictate first.".to_string());
+            return;
+        }
+
+        info!("Starting LLaMA Markdown summarization...");
+        self.summary.is_generating = true;
+        self.summary.status_text = Some("Initializing LLM...".to_string());
+
+        let summary_tx = self.summary_tx.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            match rt {
+                Ok(rt) => {
+                    let tx_for_status = summary_tx.clone();
+                    let res = rt.block_on(request_summary_with_progress(
+                        DEFAULT_LLAMA_SERVICE,
+                        DEFAULT_LLAMA_API_URL,
+                        DEFAULT_LLAMA_HEALTH_URL,
+                        &speech_text,
+                        move |status_str| {
+                            let _ = tx_for_status.send(FixProgress::Status(status_str.to_string()));
+                        },
+                    ));
+                    match res {
+                        Ok(summary_md) => {
+                            let _ = summary_tx.send(FixProgress::Done(Ok(summary_md)));
+                        }
+                        Err(e) => {
+                            let _ = summary_tx.send(FixProgress::Done(Err(e.to_string())));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = summary_tx.send(FixProgress::Done(Err(format!("Runtime error: {:?}", e))));
+                }
+            }
+        });
+    }
+
+    fn trigger_summary_update(&mut self) {
+        if self.summary.is_generating {
+            return;
+        }
+
+        let new_speech = self.text.clone();
+        if new_speech.trim().is_empty() {
+            self.summary.status_text = Some("No new speech to incorporate.".to_string());
+            return;
+        }
+
+        let existing_markdown = self.summary.markdown_text.clone();
+        if existing_markdown.trim().is_empty() {
+            self.trigger_summary();
+            return;
+        }
+
+        info!("Updating existing Markdown summary with new dictated speech...");
+        self.summary.is_generating = true;
+        self.summary.status_text = Some("Incorporating updates...".to_string());
+
+        let summary_tx = self.summary_tx.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            match rt {
+                Ok(rt) => {
+                    let tx_for_status = summary_tx.clone();
+                    let res = rt.block_on(request_summary_update_with_progress(
+                        DEFAULT_LLAMA_SERVICE,
+                        DEFAULT_LLAMA_API_URL,
+                        DEFAULT_LLAMA_HEALTH_URL,
+                        &existing_markdown,
+                        &new_speech,
+                        move |status_str| {
+                            let _ = tx_for_status.send(FixProgress::Status(status_str.to_string()));
+                        },
+                    ));
+                    match res {
+                        Ok(updated_md) => {
+                            let _ = summary_tx.send(FixProgress::Done(Ok(updated_md)));
+                        }
+                        Err(e) => {
+                            let _ = summary_tx.send(FixProgress::Done(Err(e.to_string())));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = summary_tx.send(FixProgress::Done(Err(format!("Runtime error: {:?}", e))));
+                }
+            }
+        });
+    }
+
     fn stop_and_paste(&mut self) {
-        info!("Stopping recording and delegating paste to daemon: {}", self.text);
-        if self.fix_window.is_open {
+        let text_to_paste = if self.summary.is_expanded && !self.summary.markdown_text.is_empty() {
+            info!("Summary is expanded: pasting formatted Markdown text instead of raw speech");
+            self.summary.markdown_text.clone()
+        } else {
+            self.text.clone()
+        };
+
+        info!("Stopping recording and delegating paste to daemon: {}", text_to_paste);
+        if self.fix_window.is_open || self.summary.is_expanded {
             Self::stop_llama_service_async();
         }
 
@@ -146,7 +284,7 @@ impl WhisperClientApp {
             .ok();
 
         // Safe async clipboard copy in client background thread (never blocks GUI loop)
-        let text_copy = self.text.clone();
+        let text_copy = text_to_paste.clone();
         std::thread::spawn(move || {
             let _ = copy_to_clipboard(&text_copy);
         });
@@ -154,7 +292,7 @@ impl WhisperClientApp {
         let _ = self.ipc.cmd_tx.send(ClientCommand::StopAndPaste {
             pid,
             delay_ms: 180,
-            text: Some(self.text.clone()),
+            text: Some(text_to_paste),
             wayland_display,
         });
 
@@ -354,11 +492,36 @@ impl eframe::App for WhisperClientApp {
             }
         }
 
-        // 3. Handle Keyboard Shortcuts
+        // 3. Process LLM summary results
+        while let Ok(msg) = self.summary_rx.try_recv() {
+            match msg {
+                FixProgress::Status(status) => {
+                    self.summary.status_text = Some(status);
+                }
+                FixProgress::Done(Ok(result_md)) => {
+                    info!("LLaMA summary successfully generated");
+                    self.summary.is_generating = false;
+                    self.summary.status_text = None;
+                    self.summary.markdown_text = result_md;
+                }
+                FixProgress::Done(Err(err_msg)) => {
+                    tracing::error!("LLaMA summary failed: {}", err_msg);
+                    self.summary.is_generating = false;
+                    self.summary.status_text = Some(format!("Summary error: {}", err_msg));
+                }
+            }
+        }
+
+        // 4. Handle Keyboard Shortcuts
         let mut do_stop_and_paste = false;
         let mut do_cancel_and_exit = false;
         let mut do_toggle_pause = false;
         let mut do_toggle_edit = false;
+        let mut do_trigger_summary_update = false;
+        let mut do_collapse_summary = false;
+
+        let ctrl_clicked = ctx.input(|i| (i.modifiers.ctrl || i.modifiers.command) && !self.prev_ctrl_pressed);
+        self.prev_ctrl_pressed = ctx.input(|i| i.modifiers.ctrl || i.modifiers.command);
 
         ctx.input(|i| {
             if self.fix_window.is_open {
@@ -379,6 +542,20 @@ impl eframe::App for WhisperClientApp {
                 if i.key_pressed(Key::Escape) {
                     do_toggle_edit = true;
                 }
+            } else if self.summary.is_expanded {
+                // In Summary expanded mode:
+                // If user pressed Ctrl alone (or Ctrl+Enter) to update summary:
+                if (ctrl_clicked && !self.text.trim().is_empty())
+                    || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(Key::Enter))
+                {
+                    do_trigger_summary_update = true;
+                } else if i.key_pressed(Key::Enter) {
+                    do_stop_and_paste = true;
+                } else if i.key_pressed(Key::Space) {
+                    do_toggle_pause = true;
+                } else if i.key_pressed(Key::Escape) {
+                    do_collapse_summary = true;
+                }
             } else {
                 // In navigational mode:
                 if i.key_pressed(Key::Space) {
@@ -391,10 +568,15 @@ impl eframe::App for WhisperClientApp {
             }
         });
 
+        if do_trigger_summary_update {
+            self.trigger_summary_update();
+        }
+        if do_collapse_summary {
+            self.toggle_summary(ctx);
+        }
         if do_toggle_edit {
             self.toggle_edit();
         }
-
         if do_toggle_pause {
             self.toggle_pause();
         }
@@ -495,7 +677,12 @@ impl eframe::App for WhisperClientApp {
 
                             ui.add_space(4.0);
 
-                            // 2. Stop & Paste Pill: [↵ Enter Stop & Paste]
+                            // 2. Stop & Paste Pill: [↵ Enter Stop & Paste / Paste Summary]
+                            let enter_label = if self.summary.is_expanded && !self.summary.markdown_text.is_empty() {
+                                "Paste Summary"
+                            } else {
+                                "Stop & Paste"
+                            };
                             let enter_pill = Frame::none()
                                 .fill(CHIP_BG)
                                 .stroke(Stroke::new(1.0, OUTLINE))
@@ -507,7 +694,7 @@ impl eframe::App for WhisperClientApp {
                                     paint_enter_icon(ui.painter(), r.center(), KEY_PILL_TEXT);
                                     ui.add_space(2.0);
                                     ui.label(RichText::new("Enter").color(KEY_PILL_TEXT).strong().size(12.0));
-                                    ui.label(RichText::new("Stop & Paste").color(ON_SURFACE_DIM).size(12.0));
+                                    ui.label(RichText::new(enter_label).color(ON_SURFACE_DIM).size(12.0));
                                 });
                             }).response;
                             let enter_interact = enter_resp.interact(Sense::click());
@@ -546,7 +733,8 @@ impl eframe::App for WhisperClientApp {
 
                             ui.add_space(4.0);
 
-                            // 4. Esc Cancel Pill: [⎋ Esc Cancel]
+                            // 4. Esc Cancel Pill: [⎋ Esc Cancel / Collapse]
+                            let esc_label = if self.summary.is_expanded { "Collapse" } else { "Cancel" };
                             let esc_pill = Frame::none()
                                 .fill(CHIP_BG)
                                 .stroke(Stroke::new(1.0, OUTLINE))
@@ -558,7 +746,7 @@ impl eframe::App for WhisperClientApp {
                                     paint_esc_icon(ui.painter(), r.center(), KEY_PILL_TEXT);
                                     ui.add_space(2.0);
                                     ui.label(RichText::new("Esc").color(KEY_PILL_TEXT).strong().size(12.0));
-                                    ui.label(RichText::new("Cancel").color(ON_SURFACE_DIM).size(12.0));
+                                    ui.label(RichText::new(esc_label).color(ON_SURFACE_DIM).size(12.0));
                                 });
                             }).response;
                             let esc_interact = esc_resp.interact(Sense::click());
@@ -566,7 +754,37 @@ impl eframe::App for WhisperClientApp {
                                 ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
                             }
                             if esc_interact.clicked() {
-                                self.cancel_and_exit();
+                                if self.summary.is_expanded {
+                                    self.toggle_summary(ui.ctx());
+                                } else {
+                                    self.cancel_and_exit();
+                                }
+                            }
+
+                            // 5. Ctrl Update Pill (when Summary is expanded)
+                            if self.summary.is_expanded {
+                                ui.add_space(4.0);
+                                let update_pill = Frame::none()
+                                    .fill(CHIP_BG)
+                                    .stroke(Stroke::new(1.0, OUTLINE))
+                                    .rounding(16.0)
+                                    .inner_margin(Margin::symmetric(10.0, 6.0));
+                                let update_resp = update_pill.show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                                        paint_summary_icon(ui.painter(), r.center(), KEY_PILL_TEXT);
+                                        ui.add_space(2.0);
+                                        ui.label(RichText::new("Ctrl").color(KEY_PILL_TEXT).strong().size(12.0));
+                                        ui.label(RichText::new("Update Summary").color(ON_SURFACE_DIM).size(12.0));
+                                    });
+                                }).response;
+                                let update_interact = update_resp.interact(Sense::click());
+                                if update_interact.hovered() && !self.summary.is_generating {
+                                    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                                }
+                                if update_interact.clicked() && !self.summary.is_generating {
+                                    self.trigger_summary_update();
+                                }
                             }
                         });
                     });
@@ -576,21 +794,25 @@ impl eframe::App for WhisperClientApp {
                     ui.label(RichText::new(err).color(ERROR_TEXT).size(12.0));
                 }
 
-                ui.add_space(12.0);
+                ui.add_space(10.0);
 
                 // Central Main Card: Text Display / Editor + Bottom Waveform
-                let editor_card_height = (ui.available_height() - 56.0).max(180.0);
+                let editor_card_height = if self.summary.is_expanded {
+                    190.0
+                } else {
+                    (ui.available_height() - 56.0).max(180.0)
+                };
                 Frame::none()
                     .fill(SURFACE_EDITOR)
                     .stroke(Stroke::new(1.0, OUTLINE))
                     .rounding(20.0)
                     .inner_margin(16.0)
                     .show(ui, |ui| {
-                        let text_height = (editor_card_height - 65.0).max(120.0);
+                        let text_height = (editor_card_height - 65.0).max(110.0);
                         let text_edit = TextEdit::multiline(&mut self.text)
                             .text_color(ON_SURFACE)
                             .desired_width(ui.available_width())
-                            .desired_rows(10)
+                            .desired_rows(if self.summary.is_expanded { 5 } else { 10 })
                             .interactive(self.is_editing)
                             .hint_text("Live streaming transcript will appear here... |");
 
@@ -605,9 +827,33 @@ impl eframe::App for WhisperClientApp {
                         });
                     });
 
+                // Summary Markdown View Card (Rendered below main card when expanded)
+                if self.summary.is_expanded {
+                    ui.add_space(10.0);
+                    let summary_card_height = (ui.available_height() - 56.0).max(220.0);
+                    ui.allocate_ui(vec2(ui.available_width(), summary_card_height), |ui| {
+                        if let Some(action) = self.summary.show(ui, !self.text.trim().is_empty()) {
+                            match action {
+                                SummaryAction::Update => self.trigger_summary_update(),
+                                SummaryAction::Copy => {
+                                    let md = self.summary.markdown_text.clone();
+                                    let _ = copy_to_clipboard(&md);
+                                    if let Ok(mut c) = arboard::Clipboard::new() {
+                                        let _ = c.set_text(md);
+                                    }
+                                    self.summary.copied_notify_time = Some(Instant::now());
+                                }
+                                SummaryAction::Collapse => {
+                                    self.toggle_summary(ctx);
+                                }
+                            }
+                        }
+                    });
+                }
+
                 ui.add_space(10.0);
 
-                // Bottom Row of Action Buttons (Left: Clear, Edit, Fix | Right: Resume/Pause, Stop & Paste)
+                // Bottom Row of Action Buttons (Left: Clear, Edit, Summary, Fix | Right: Resume/Pause, Stop & Paste)
                 ui.horizontal(|ui| {
                     let btn_padding = Margin::symmetric(14.0, 7.0);
 
@@ -660,7 +906,32 @@ impl eframe::App for WhisperClientApp {
 
                     ui.add_space(6.0);
 
-                    // 3. [Fix (LLM)] - Elevated / Highlighted Tonal Pill
+                    // 3. [Summary] - Expands/Collapses Markdown Summary Panel
+                    let sum_is_active = self.summary.is_expanded;
+                    let sum_frame = Frame::none()
+                        .fill(if sum_is_active { TONAL_FIX_BG } else { SURFACE_CARD })
+                        .stroke(Stroke::new(1.0, if sum_is_active { TONAL_FIX_STROKE } else { OUTLINE }))
+                        .rounding(18.0)
+                        .inner_margin(btn_padding);
+                    let sum_resp = sum_frame.show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+                            paint_summary_icon(ui.painter(), r.center(), if sum_is_active { PRIMARY } else { ON_SURFACE_DIM });
+                            ui.add_space(3.0);
+                            ui.label(RichText::new("Summary").size(13.0).strong().color(if sum_is_active { TONAL_FIX_TEXT } else { ON_SURFACE }));
+                        });
+                    }).response;
+                    let sum_interact = sum_resp.interact(Sense::click());
+                    if sum_interact.hovered() {
+                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                    }
+                    if sum_interact.clicked() {
+                        self.toggle_summary(ui.ctx());
+                    }
+
+                    ui.add_space(6.0);
+
+                    // 4. [Fix (LLM)] - Elevated / Highlighted Tonal Pill
                     let fix_frame = Frame::none()
                         .fill(TONAL_FIX_BG)
                         .stroke(Stroke::new(1.0, TONAL_FIX_STROKE))
@@ -682,9 +953,14 @@ impl eframe::App for WhisperClientApp {
                         self.open_fix_window();
                     }
 
-                    // Right group: [Resume / Pause] and [Stop & Paste]
+                    // Right group: [Resume / Pause] and [Stop & Paste / Paste Summary]
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        // 5. [Stop & Paste] - Filled Lavender/Purple Primary Button (Far Right)
+                        // 6. [Stop & Paste / Paste Summary] - Filled Lavender/Purple Primary Button (Far Right)
+                        let stop_paste_label = if self.summary.is_expanded && !self.summary.markdown_text.is_empty() {
+                            "Paste Summary"
+                        } else {
+                            "Stop & Paste"
+                        };
                         let stop_paste_frame = Frame::none()
                             .fill(PRIMARY_BUTTON_BG)
                             .rounding(18.0)
@@ -694,7 +970,7 @@ impl eframe::App for WhisperClientApp {
                                 let (r, _) = ui.allocate_exact_size(vec2(15.0, 15.0), Sense::hover());
                                 paint_paste_icon(ui.painter(), r.center(), PRIMARY_BUTTON_TEXT);
                                 ui.add_space(3.0);
-                                ui.label(RichText::new("Stop & Paste").size(13.0).strong().color(PRIMARY_BUTTON_TEXT));
+                                ui.label(RichText::new(stop_paste_label).size(13.0).strong().color(PRIMARY_BUTTON_TEXT));
                             });
                         }).response;
                         let stop_interact = stop_paste_resp.interact(Sense::click());
@@ -707,7 +983,7 @@ impl eframe::App for WhisperClientApp {
 
                         ui.add_space(8.0);
 
-                        // 4. [Resume / Pause]
+                        // 5. [Resume / Pause]
                         let is_listening = self.state == DaemonState::Listening;
                         let pause_text = if is_listening { "Pause" } else { "Resume" };
                         let pause_frame = Frame::none()

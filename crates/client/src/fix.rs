@@ -254,6 +254,144 @@ where
     Ok(clean_revised)
 }
 
+pub async fn request_summary_with_progress<F>(
+    service_name: &str,
+    endpoint: &str,
+    health_url: &str,
+    speech_text: &str,
+    mut on_status: F,
+) -> Result<String>
+where
+    F: FnMut(&str),
+{
+    ensure_service_ready(service_name, health_url, &mut on_status).await?;
+
+    on_status("Summarizing into Markdown...");
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()?;
+
+    let prompt = format!(
+        "Dictated speech to summarize and format:\n\"\"\"\n{}\n\"\"\"\n\nStructure, clean up, and format the key information into clean Markdown with clear headings and bullet points. Output ONLY the Markdown document.",
+        speech_text.trim()
+    );
+
+    let payload = ChatRequest {
+        messages: vec![
+            ChatMessage {
+                role: "system",
+                content: "You are an expert executive assistant and Markdown writer. Summarize the provided speech into a clear, beautifully structured Markdown document. Use clear headings (#, ##), clean bullet points, bold key terms, and clean paragraphs. Eliminate verbal mess, repetition, and filler words. Output ONLY valid Markdown without any conversational intro, outro, or commentary.",
+            },
+            ChatMessage {
+                role: "user",
+                content: &prompt,
+            },
+        ],
+        temperature: 0.2,
+    };
+
+    info!("Sending speech to LLM for Markdown summarization at {}", endpoint);
+
+    let res = client
+        .post(endpoint)
+        .json(&payload)
+        .send()
+        .await
+        .context("Failed to connect to LLM server. Is llama.service running?")?;
+
+    if !res.status().is_success() {
+        let status = res.status();
+        let body = res.text().await.unwrap_or_default();
+        anyhow::bail!("LLM server returned error status {}: {}", status, body);
+    }
+
+    let chat_res: ChatResponse = res
+        .json()
+        .await
+        .context("Failed to parse LLM JSON response")?;
+
+    let summary = chat_res
+        .choices
+        .first()
+        .map(|c| c.message.content.trim())
+        .unwrap_or("")
+        .to_string();
+
+    let clean = clean_code_fences(&summary);
+    Ok(clean)
+}
+
+pub async fn request_summary_update_with_progress<F>(
+    service_name: &str,
+    endpoint: &str,
+    health_url: &str,
+    existing_markdown: &str,
+    new_speech: &str,
+    mut on_status: F,
+) -> Result<String>
+where
+    F: FnMut(&str),
+{
+    ensure_service_ready(service_name, health_url, &mut on_status).await?;
+
+    on_status("Updating Markdown summary...");
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()?;
+
+    let prompt = format!(
+        "Existing Markdown Document:\n\"\"\"\n{}\n\"\"\"\n\nNewly dictated notes / amendments to incorporate:\n\"\"\"\n{}\n\"\"\"\n\nIncorporate, refine, and merge the new notes into the existing Markdown document. Output ONLY the updated Markdown document.",
+        existing_markdown.trim(),
+        new_speech.trim()
+    );
+
+    let payload = ChatRequest {
+        messages: vec![
+            ChatMessage {
+                role: "system",
+                content: "You are an expert executive assistant and Markdown writer. You are given an existing Markdown document and newly dictated user notes/amendments. Update, incorporate, and expand the Markdown document with the new information. Maintain clean Markdown formatting (#, ##, bullet points, bold key terms) and smooth logical organization. Eliminate verbal mess and filler words. Output ONLY the updated Markdown document without any conversational intro, outro, or commentary.",
+            },
+            ChatMessage {
+                role: "user",
+                content: &prompt,
+            },
+        ],
+        temperature: 0.2,
+    };
+
+    info!("Sending summary update request to LLM at {}", endpoint);
+
+    let res = client
+        .post(endpoint)
+        .json(&payload)
+        .send()
+        .await
+        .context("Failed to connect to LLM server. Is llama.service running?")?;
+
+    if !res.status().is_success() {
+        let status = res.status();
+        let body = res.text().await.unwrap_or_default();
+        anyhow::bail!("LLM server returned error status {}: {}", status, body);
+    }
+
+    let chat_res: ChatResponse = res
+        .json()
+        .await
+        .context("Failed to parse LLM JSON response")?;
+
+    let summary = chat_res
+        .choices
+        .first()
+        .map(|c| c.message.content.trim())
+        .unwrap_or("")
+        .to_string();
+
+    let clean = clean_code_fences(&summary);
+    Ok(clean)
+}
+
 fn clean_code_fences(text: &str) -> String {
     let trimmed = text.trim();
     if trimmed.starts_with("```") && trimmed.ends_with("```") {
@@ -277,6 +415,9 @@ mod tests {
 
         let text_with_lang = "```markdown\nHello world\n```";
         assert_eq!(clean_code_fences(text_with_lang), "Hello world");
+
+        let multiline_markdown = "```markdown\n# Title\n- Point 1\n- Point 2\n```";
+        assert_eq!(clean_code_fences(multiline_markdown), "# Title\n- Point 1\n- Point 2");
 
         let plain = "Hello world";
         assert_eq!(clean_code_fences(plain), "Hello world");
