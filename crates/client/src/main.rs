@@ -48,8 +48,8 @@ fn main() -> eframe::Result<()> {
         renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default()
             .with_app_id("whisper-dictation")
-            .with_inner_size([630.0, 520.0])
-            .with_min_inner_size([560.0, 450.0])
+            .with_inner_size([690.0, 520.0])
+            .with_min_inner_size([620.0, 450.0])
             .with_title("Whisper Dictation [EN]")
             .with_always_on_top()
             .with_decorations(true)

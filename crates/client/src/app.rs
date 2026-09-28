@@ -151,11 +151,11 @@ impl WhisperClientApp {
         if self.summary.is_expanded {
             info!("Collapsing Summary view");
             self.summary.is_expanded = false;
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(630.0, 520.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(690.0, 520.0)));
         } else {
             info!("Expanding Summary view vertically");
             self.summary.is_expanded = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(630.0, 860.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(690.0, 860.0)));
             if self.summary.markdown_text.is_empty() && !self.text.trim().is_empty() {
                 self.trigger_summary();
             }
