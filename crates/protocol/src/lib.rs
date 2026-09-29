@@ -16,6 +16,9 @@ pub enum ClientCommand {
     PauseListening,
     ResumeListening,
     ClearBuffer,
+    SetBuffer {
+        text: String,
+    },
     Stop,
     StopAndPaste {
         #[serde(default)]
@@ -118,6 +121,12 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&ClientCommand::ClearBuffer).unwrap(),
             r#"{"type":"ClearBuffer"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&ClientCommand::SetBuffer {
+                text: "edited\nlines".to_string(),
+            }).unwrap(),
+            r#"{"type":"SetBuffer","text":"edited\nlines"}"#
         );
         assert_eq!(
             serde_json::to_string(&ClientCommand::Stop).unwrap(),

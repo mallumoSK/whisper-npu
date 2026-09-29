@@ -99,15 +99,25 @@ impl WhisperClientApp {
         if self.is_editing {
             // Exiting edit mode ("Done")
             self.is_editing = false;
-            if self.was_recording_before_edit {
-                info!("Exiting edit mode: resuming recording");
-                let _ = self.ipc.cmd_tx.send(ClientCommand::ResumeListening);
-                self.state = DaemonState::Listening;
-                self.was_recording_before_edit = false;
-                self.stt_target = SttTarget::MainText;
-            } else {
-                info!("Exiting edit mode: staying paused");
+            info!("Exiting edit mode (Done): syncing buffer to daemon and resuming recognition");
+
+            // Drain any pending/stale transcript events in event_rx that arrived while editing
+            while let Ok(event) = self.ipc.event_rx.try_recv() {
+                if let DaemonEvent::StateChanged { data } = event {
+                    self.state = data;
+                }
             }
+
+            // Sync user's edited text to the daemon buffer
+            let _ = self.ipc.cmd_tx.send(ClientCommand::SetBuffer {
+                text: self.text.clone(),
+            });
+
+            // Start/resume speech recognition again
+            let _ = self.ipc.cmd_tx.send(ClientCommand::ResumeListening);
+            self.state = DaemonState::Listening;
+            self.was_recording_before_edit = false;
+            self.stt_target = SttTarget::MainText;
         } else {
             // Entering edit mode ("Edit")
             if self.state == DaemonState::Listening {
@@ -423,6 +433,9 @@ impl WhisperClientApp {
             self.stt_target = SttTarget::Ignore;
             self.text = self.fix_window.result_text.clone();
             self.fix_window.is_open = false;
+            let _ = self.ipc.cmd_tx.send(ClientCommand::SetBuffer {
+                text: self.text.clone(),
+            });
             if self.state == DaemonState::Listening {
                 let _ = self.ipc.cmd_tx.send(ClientCommand::PauseListening);
                 self.state = DaemonState::Paused;
@@ -465,11 +478,10 @@ impl eframe::App for WhisperClientApp {
                     self.state = data;
                 }
                 DaemonEvent::PartialTranscript { data } => {
-                    let data = strip_trailing_you(&data);
                     match self.stt_target {
                         SttTarget::FixPrompt => {
                             if self.fix_window.is_open && self.fix_window.phase == FixPhase::Prompting {
-                                self.fix_window.prompt_text = data;
+                                self.fix_window.prompt_text = strip_trailing_you(&data);
                             }
                         }
                         SttTarget::MainText => {
@@ -481,11 +493,10 @@ impl eframe::App for WhisperClientApp {
                     }
                 }
                 DaemonEvent::FinalTranscript { data } => {
-                    let data = strip_trailing_you(&data);
                     match self.stt_target {
                         SttTarget::FixPrompt => {
                             if self.fix_window.is_open && self.fix_window.phase == FixPhase::Prompting {
-                                self.fix_window.prompt_text = data;
+                                self.fix_window.prompt_text = strip_trailing_you(&data);
                             }
                         }
                         SttTarget::MainText => {

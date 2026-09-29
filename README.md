@@ -1,6 +1,7 @@
 # Whisper-NPU 🎙️⚡
 
-> **Fast, private, offline voice dictation overlay for Linux (Wayland & GNOME) powered by ONNX Runtime, Sherpa-ONNX, and Rust.**
+> **Fast, private, offline voice dictation overlay for Linux (Wayland & GNOME) powered by ONNX
+Runtime, Sherpa-ONNX, and Rust.**
 
 <p align="center">
   <img src="assets/demo.gif" alt="Whisper Dictation Live Demo" width="720" />
@@ -8,7 +9,9 @@
   <em>Live dictation, LLM fix sidecar, and automated Wayland paste. (<a href="assets/demo.webm">Watch High-Res WebM Video</a> | <a href="assets/app_screenshot.png">View Screenshot</a>)</em>
 </p>
 
-Whisper-NPU provides a lightning-fast floating voice dictation overlay that transcribes your speech in real-time and automatically pastes the text directly into whichever application you are using—whether it's VS Code, a web browser, terminal, or chat client.
+Whisper-NPU provides a lightning-fast floating voice dictation overlay that transcribes your speech
+in real-time and automatically pastes the text directly into whichever application you are
+using—whether it's VS Code, a web browser, terminal, or chat client.
 
 ---
 
@@ -16,21 +19,34 @@ Whisper-NPU provides a lightning-fast floating voice dictation overlay that tran
 
 * **100% Offline & Private:** Dictation runs entirely locally on your machine using quantized INT8
   `distil-whisper-large-v3` weights. No audio or text ever leaves your device.
+* **Instant Startup (<66ms):** Lightweight OpenGL (`glow`) rendering backend provides instant,
+  lag-free
+  overlay activation without Vulkan pipeline initialization delays.
 * **Instant Paste (`Ctrl+V`):** When you finish dictating (by pressing `Enter`), the overlay closes
   and automatically injects the text into your active cursor position using `ydotool` and
   `wl-clipboard`.
-* **Persistent Always-on-Top Overlay:** Sleek Material Design 3 dark interface that remains pinned
-  above all windows even while switching focus.
+* **Persistent Always-on-Top Overlay:** Sleek Material Design 3 dark interface (expanded to 800px
+  min-width)
+  that remains pinned above all windows even while switching focus.
+* **Executive Summary & Iterative Notes:** Vertically expandable Markdown panel powered by local
+  LLaMA.
+  Turns messy voice transcripts into clean, formatted markdown notes, with an iterative loop (
+  `Ctrl`) to
+  continually refine summaries with new speech.
 * **Fix with LLM Sidecar:** One-click auxiliary window that lets you dictate instructions (e.g., *"
   Make this sound professional"* or *"Fix punctuation"*) to polish your text using a local LLM
   before pasting.
-* **Audio Feedback Protection:** Integrates with PipeWire (`wpctl`) to automatically mute laptop
-  speakers during speech capture, eliminating audio feedback loops.
+* **Audio Feedback & Hallucination Protection:** Integrates with PipeWire (`wpctl`) to automatically
+  mute
+  laptop speakers during speech capture, and automatically strips trailing silence hallucinations (
+  e.g. trailing "you").
 * **Full Keyboard Control:**
     * **`Space`**: Pause / Resume recording
-    * **`Enter`**: Finalize dictation, copy to clipboard, and paste into active window
-    * **`Esc`**: Cancel dictation and dismiss overlay
-    * **`Edit` Mode**: Edit transcribed text directly before pasting
+    * **`Shift`**: Instant Clear (resets buffer and automatically resumes recognition)
+    * **`Ctrl`**: Access Executive Summary (stops recognition and generates/updates Markdown notes)
+    * **`Enter`**: Stop & Paste into active window (pastes Markdown summary if expanded)
+    * **`Esc`**: Cancel dictation or Collapse summary
+    * **`Edit` Mode**: Edit transcribed text directly before pasting (auto-pauses audio)
 
 ---
 
@@ -191,17 +207,26 @@ Run both daemon and client together using the top-level launcher:
 </p>
 
 1. **Activate the Overlay:** Press your custom shortcut (or run `./scripts/run_client.sh`).
-2. **Speak Naturally:** Dictate your thoughts. Speech is transcribed and displayed live in
-   real-time.
+2. **Speak Naturally:** Dictate your thoughts. Speech is transcribed and displayed live in real-time
+   with trailing hallucination filtering.
 3. **Control Recording:**
     * Press `Space` to pause or resume recording.
-    * Click `[Clear]` to wipe the text and start over.
-    * Click `[Edit]` to make manual keyboard corrections (recording auto-pauses while editing).
-4. **Fix with LLM (Optional):** Click `[Fix]` to open the auxiliary sidecar window. Dictate a
+    * Press `Shift` or click `[Clear]` to wipe the text and immediately restart recognition.
+    * Click `[Edit]` to make manual keyboard corrections (recording auto-pauses while editing; `Esc`
+      finishes editing).
+4. **Executive Summary with LLaMA (Optional):**
+    * Press `Ctrl` or click `[Summary]` to halt speech recognition, vertically expand the window,
+      and generate a clean, structured Markdown summary of your dictated thoughts.
+    * **Iterative Refinement Loop:** Press `Shift` to clear, dictate additional thoughts or
+      instructions, and hit `Ctrl` again. LLaMA merges the new speech into your existing Markdown
+      summary.
+    * You can copy the Markdown directly via the `[Copy]` button or collapse it with `[Collapse]`.
+5. **Fix with LLM (Optional):** Click `[Fix]` to open the auxiliary sidecar window. Dictate a
    prompt (e.g. *"Fix typos and make it bullet points"*), hit `Enter`, review the AI response, and
    hit `Enter` again to apply.
-5. **Paste Anywhere:** Press `Enter`. The overlay disappears instantly and your text is pasted
-   directly into your active window.
+6. **Paste Anywhere:** Press `Enter`. The overlay disappears instantly and your text is pasted
+   directly into your active window. When the Executive Summary is open, `Enter` automatically
+   pastes the formatted Markdown summary instead of raw speech!
 
 ---
 

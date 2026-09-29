@@ -7,46 +7,92 @@ shortcuts, and IPC protocols for **Whisper-NPU**.
 
 ## 1. UI Layout & Dual-Window Hierarchy
 
-Whisper-NPU features a persistent desktop overlay with an optional auxiliary sidecar window for
-local LLM-assisted editing.
+Whisper-NPU features a persistent desktop overlay (minimum width **800px**) with an expandable
+Executive Summary panel and an optional auxiliary sidecar window for local LLM-assisted editing.
 
 ```
-┌──────────────────────────────────────────────────┐  ┌───────────────────────────────┐
-│ [~~~] Whisper Dictation                  [EN]    │  │ Fix with LLM            ─ □ ✕ │
-├──────────────────────────────────────────────────┤  ├───────────────────────────────┤
-│ [Clear] [Edit] [Fix]                             │  │ [Live STT Prompt Box]         │
-│ [Enter Stop & Paste] [␣ Space Pause] [Esc Cancel]│  │ "Fix punctuation and make..." │
-├──────────────────────────────────────────────────┤  ├───────────────────────────────┤
-│                                                  │  │ [Status / Progress Area]     │
-│  Transcribed text appears here live...           │  │   "Polishing text with LLM"    │
-│  Continuous speech recognition stream.           │  ├───────────────────────────────┤
-│                                                  │  │ [Result Preview Box]          │
-│                                                  │  │ (Shows LLM output before      │
-│                                                  │  │  applying to main window)     │
-├──────────────────────────────────────────────────┤  ├───────────────────────────────┤
-│ ● Recording...       [Clear] [Paste] [Pause]     │  │ [Cancel]  [Reprompt]  [Apply] │
-└──────────────────────────────────────────────────┘  └───────────────────────────────┘
-          Primary Overlay Window (630x520)                Auxiliary Sidecar (320x520)
+┌──────────────────────────────────────────────────────────────────────────────────────────┐  ┌───────────────────────────────┐
+│ [● REC 16kHz] [↵ Enter Stop & Paste] [␣ Space Pause] [⇧ Shift Clear] [⎋ Esc] [▤ Ctrl]    │  │ Fix with LLM            ─ □ ✕ │
+├──────────────────────────────────────────────────────────────────────────────────────────┤  ├───────────────────────────────┤
+│                                                                                          │  │ [Live STT Prompt Box]         │
+│  Transcribed speech appears here live in real-time...                                   │  │ "Fix punctuation and make..." │
+│  (Automatically filters trailing silence artifacts like "you" / " You.")                 │  ├───────────────────────────────┤
+│                                                                                          │  │ [Status / Progress Area]     │
+│  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Soundwave ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ │  │   "Polishing text with LLM"    │
+├──────────────────────────────────────────────────────────────────────────────────────────┤  ├───────────────────────────────┤
+│ [Executive Summary - Expandable Markdown Panel (Ctrl)]                                   │  │ [Result Preview Box]          │
+│  ### Structured Notes                                                                    │  │ (Shows LLM output before      │
+│  * Formatted points, cleaned-up speech, and markdown highlights                          │  │  applying to main window)     │
+│  [Copy Markdown]  [Collapse]                                                             │  ├───────────────────────────────┤
+├──────────────────────────────────────────────────────────────────────────────────────────┤  │ [Cancel]  [Reprompt]  [Apply] │
+│ [Shift Clear] [Edit] [Summary] [Fix]                           [Pause] [Stop & Paste]   │  └───────────────────────────────┘
+└──────────────────────────────────────────────────────────────────────────────────────────┘      Auxiliary Sidecar (320x520)
+       Primary Overlay Window (800x520 Collapsed | 800x860 Summary Expanded)
 ```
 
 ### Main Window Controls:
 
 * **Wave Visualizer:** Animated reactive soundwave reflecting listening state.
-* **`[Clear]`:** Clears current buffer and resets daemon transcription history.
+* **`[Shift Clear]` / Key `Shift`:** Clears current buffer, resets daemon transcription history, and
+  automatically resumes speech recognition if paused.
 * **`[Edit]`:** Toggles manual editing mode.
-    * If recording was active, entering Edit mode automatically **pauses** recording so typing is
-      uninterrupted.
-    * Clicking **`[Done]`** exits edit mode and automatically resumes recording if it was previously
-      active.
+    * Entering Edit mode automatically **pauses** recording so typing is uninterrupted.
+    * In editing mode, `Shift` typing behaves normally (capital letters, punctuation) without
+      clearing text.
+    * Pressing `Esc` or clicking **`[Done]`** exits edit mode and resumes recording.
+* **`[Summary]` / Key `Ctrl`:** Interrupts recognition, vertically expands window to 860px, and
+  invokes
+  LLaMA to summarize dictated thoughts into structured Markdown.
 * **`[Fix]`:** Opens the auxiliary "Fix with LLM" sidecar on the right, sets STT target to the fix
-  prompt box, and starts local speech capture for the fix command.
-* **Shortcut Pills:** Direct visual cues for global hotkeys (`Enter`, `Space`, `Esc`).
+  prompt box, and captures the fix command via voice.
+* **Shortcut Pills:** Interactive visual pills for fast hotkey access (`Enter`, `Space`, `Shift`,
+  `Esc`, `Ctrl`).
 * **Transcription Canvas:** Dark card (`#1C1B1F`), scrollable, live streaming speech-to-text.
-* **Bottom Bar:** Quick action buttons (`[Clear]`, `[Done / Paste]`, `[Pause / Resume]`).
+* **Bottom Bar:** Quick action buttons (`[Clear]`, `[Edit]`, `[Summary]`, `[Fix]`, `[Pause/Resume]`,
+  `[Stop & Paste]`).
 
 ---
 
-## 2. "Fix with LLM" Auxiliary Viewport Lifecycle
+## 2. Executive Summary Lifecycle & Iterative Refinement Loop
+
+The Executive Summary is integrated directly into the primary window and can be expanded or
+collapsed dynamically:
+
+```
+[User presses Ctrl or clicks Summary]
+                 │
+                 ▼
+1. Master Recognition Stop:
+   Client sends `ClientCommand::PauseListening` to halt audio recording.
+                 │
+                 ▼
+2. Window Expansion:
+   Primary window expands from 520px to 860px height (800px min width).
+                 │
+                 ▼
+3. Local LLaMA Invocation:
+   Streams request to `http://127.0.0.1:8080/v1/chat/completions`.
+   - First call: Summarizes transcribed text into clean, structured Markdown.
+   - Iterative update calls: Passes both existing Markdown summary and newly dictated speech.
+                 │
+                 ▼
+4. Output Display:
+   Renders formatted Markdown in a scrollable, read-only viewer.
+                 │
+                 ▼
+5. Iterative Update Loop:
+   User presses `Shift` to clear buffer, speaks additional thoughts, and hits `Ctrl` again.
+   LLaMA continuously refines and adds to the Markdown definition.
+                 │
+                 ▼
+6. Contextual EnterAction:
+   Pressing `Enter` while Summary is expanded pastes the formatted Markdown text directly
+   into the active application instead of the raw speech transcript!
+```
+
+---
+
+## 3. "Fix with LLM" Auxiliary Viewport Lifecycle
 
 The auxiliary window runs as an `egui::ViewportId` alongside the primary window:
 
@@ -78,30 +124,42 @@ The auxiliary window runs as an `egui::ViewportId` alongside the primary window:
 
 ---
 
-## 3. Keyboard Shortcut State Machine
+## 4. Keyboard Shortcut State Machine
 
 ```
-                   ┌───────────────────────────────────┐
-                   │        Navigational Mode          │
-                   └─────────────────┬─────────────────┘
-                                     │
-         ┌───────────────────────────┼───────────────────────────┐
-         │ Press [Space]             │ Press [Enter]             │ Press [Esc]
-         ▼                           ▼                           ▼
-┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐
-│ Toggle Pause /  │         │ Stop Recording, │         │ Cancel session, │
-│ Resume Audio    │         │ Copy & Paste    │         │ Exit client     │
-└─────────────────┘         └─────────────────┘         └─────────────────┘
-                                     │
-                             Press [Edit] Button
-                                     ▼
-                   ┌───────────────────────────────────┐
-                   │           Editing Mode            │
-                   ├───────────────────────────────────┤
-                   │ [Space] -> Types space character  │
-                   │ [Enter] -> Inserts newline        │
-                   │ [Esc]   -> Exits editing mode     │
-                   └───────────────────────────────────┘
+                              ┌───────────────────────────────────┐
+                              │        Navigational Mode          │
+                              └─────────────────┬─────────────────┘
+                                                │
+       ┌────────────────────┬───────────────────┼───────────────────┬────────────────────┐
+       │ Press [Shift]      │ Press [Ctrl]      │ Press [Space]     │ Press [Enter]      │ Press [Esc]
+       ▼                    ▼                   ▼                   ▼                    ▼
+┌──────────────┐    ┌───────────────┐   ┌─────────────────┐ ┌─────────────────┐  ┌─────────────────┐
+│ Clear buffer │    │ Master Stop & │   │ Toggle Pause /  │ │ Stop Recording, │  │ Cancel session, │
+│ & Auto-Resume│    │ Expand Summary│   │ Resume Audio    │ │ Copy & Paste    │  │ Exit client     │
+└──────────────┘    └───────┬───────┘   └─────────────────┘ └─────────────────┘  └─────────────────┘
+                            │
+                            ▼
+              ┌───────────────────────────┐
+              │   Summary Expanded Mode   │
+              ├───────────────────────────┤
+              │ [Ctrl]  -> Update Summary │
+              │ [Enter] -> Paste Markdown │
+              │ [Shift] -> Clear voice STT│
+              │ [Space] -> Pause / Resume │
+              │ [Esc]   -> Collapse panel │
+              └───────────────────────────┘
+                            │
+                    Press [Edit] Button
+                            ▼
+              ┌───────────────────────────┐
+              │       Editing Mode        │
+              ├───────────────────────────┤
+              │ [Shift] -> Normal typing  │
+              │ [Space] -> Inserts space  │
+              │ [Enter] -> Newline        │
+              │ [Esc]   -> Exit edit mode │
+              └───────────────────────────┘
 ```
 
 ---
@@ -182,10 +240,15 @@ Communication occurs over a Unix domain socket at `/run/whisper-npu/daemon.sock`
 
 ## 7. Workspace Crates
 
-* **`crates/protocol`**: Shared serialization types and IPC socket defaults.
+* **`crates/protocol`**: Shared serialization types (`ClientCommand`, `DaemonEvent`), IPC socket
+  defaults,
+  and speech post-processing sanitizers (e.g. `strip_trailing_you` to eliminate tail silence
+  artifacts).
 * **`crates/daemon`**: Background system service. Manages audio capture (`arecord`), speaker
   muting (`wpctl`), model inference (`sherpa-rs` ONNX INT8), IPC server, and automated pasting (
   `wl-copy` + `ydotool`).
-* **`crates/client`**: High-performance UI overlay in `egui`/`eframe`. Handles Xwayland
-  always-on-top, soundwave visualization, live editing, and auxiliary LLM window.
+* **`crates/client`**: High-performance UI overlay in `egui`/`eframe` (`glow` OpenGL backend).
+  Handles Xwayland
+  always-on-top, soundwave visualization, live editing, Executive Summary markdown drawer, and
+  auxiliary "Fix with LLM" sidecar.
 

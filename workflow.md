@@ -84,6 +84,56 @@ always-on-top desktop overlay, and automated clipboard injection into active app
     3. Replaced IPC polling with a reactive `tokio::sync::mpsc::unbounded_channel` to eliminate
        transmission latency.
 
+### F. Instant Startup Latency (<66ms)
+
+* **Investigation:** Initial launches of `whisper-client` suffered a 1.5 to 3.5-second latency delay
+  before the window appeared on screen.
+* **Root Cause:** The default `eframe` rendering pipeline initialized `wgpu`, causing runtime
+  discovery of Vulkan adapters, device queue setup, and shader compilation.
+* **Resolution:** Configured `eframe` with the lightweight `glow` (OpenGL) backend in `Cargo.toml`.
+  Startup latency dropped to sub-66ms, rendering the window essentially instantaneously upon hotkey
+  invocation.
+
+### G. Trailing Silence Hallucination Filtering
+
+* **Issue:** Low-volume audio tails or background breaths frequently caused Whisper to output
+  spurious trailing tokens, predominantly "you", " You", "you." or " You.".
+* **Resolution:** Implemented `strip_trailing_you` in `crates/protocol`. All partial and final
+  transcripts are sanitized at the stream boundary, ensuring tail noise never pollutes the
+  transcript buffer or pasted text.
+
+### H. Executive Summary & Iterative Markdown Synthesis
+
+* **Feature:** Integrated a vertically expandable Markdown summary panel directly below the main
+  text card.
+* **Operational Flow:**
+    1. Pressing `Ctrl` (or clicking `[Summary]`) sends a master recognition stop (
+       `ClientCommand::PauseListening`) to halt live audio recording.
+    2. The client window vertically expands from 520px to 860px.
+    3. Sends the dictated transcript to local `llama.service` (
+       `http://127.0.0.1:8080/v1/chat/completions`) for Markdown restructuring.
+    4. **Iterative Refinement Loop:** The user can wipe the voice buffer (`Shift`), dictate
+       additional context or instructions, and hit `Ctrl` again. LLaMA synthesizes the previous
+       Markdown draft with the new dictation.
+    5. **Contextual EnterAction:** When the summary is expanded, pressing `Enter` injects the
+       polished Markdown summary directly into the target application.
+
+### I. Fast Clear with Shift Shortcut & Auto-Resume
+
+* **Feature:** Assigned the physical `Shift` key (with key-down edge detection) to execute the Clear
+  action.
+* **Behavior:** Pressing `Shift` wipes `self.text`, flushes the daemon audio buffer, and
+  automatically resumes speech recognition if previously paused.
+* **Safety Guard:** Disabled during manual editing mode (`is_editing`) and Fix window prompting,
+  preserving normal capitalization and punctuation typing.
+
+### J. Window Geometry Standardization (800px Min Width)
+
+* Expanded default window geometry from 630px / 740px to a minimum width of **800px** (
+  `[800.0, 520.0]` collapsed, `[800.0, 860.0]` expanded).
+* Accommodates the full array of status indicators, shortcut pills (`Enter`, `Space`, `Shift`,
+  `Esc`, `Ctrl`), soundwave visualizer, and comfortable Markdown rendering.
+
 ---
 
 ## 3. Directory Layout

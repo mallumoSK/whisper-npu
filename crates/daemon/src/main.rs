@@ -125,16 +125,18 @@ async fn main() -> Result<()> {
                     let cleaned_text = strip_trailing_you(&res.text);
                     if cleaned_text != last_live_text {
                         last_live_text = cleaned_text.clone();
+                        let speech = cleaned_text.trim_start();
                         let full_display = if accumulated_text.is_empty() {
                             cleaned_text
-                        } else if cleaned_text.is_empty() {
+                        } else if speech.is_empty() {
                             accumulated_text.clone()
+                        } else if accumulated_text.ends_with('\n') {
+                            format!("{}{}", accumulated_text, speech)
                         } else {
-                            format!("{}\n{}", accumulated_text, cleaned_text)
+                            format!("{}\n{}", accumulated_text, speech)
                         };
-                        let display_data = strip_trailing_you(&full_display);
                         let _ = event_tx.send(DaemonEvent::PartialTranscript {
-                            data: display_data,
+                            data: full_display,
                         });
                     }
                 }
@@ -186,14 +188,14 @@ async fn main() -> Result<()> {
 
                             let final_text = strip_trailing_you(&final_text);
                             if !final_text.is_empty() {
-                                if !accumulated_text.is_empty() {
+                                let speech = final_text.trim_start();
+                                if !accumulated_text.is_empty() && !accumulated_text.ends_with('\n') {
                                     accumulated_text.push('\n');
                                 }
-                                accumulated_text.push_str(&final_text);
+                                accumulated_text.push_str(speech);
                             }
                             last_live_text.clear();
 
-                            accumulated_text = strip_trailing_you(&accumulated_text);
                             let _ = event_tx.send(DaemonEvent::FinalTranscript {
                                 data: accumulated_text.clone(),
                             });
@@ -226,6 +228,14 @@ async fn main() -> Result<()> {
                         let _ = event_tx.send(DaemonEvent::FinalTranscript {
                             data: String::new(),
                         });
+                    }
+                    ClientCommand::SetBuffer { text } => {
+                        info!("Received SetBuffer command (len: {})", text.len());
+                        accumulated_text = text;
+                        last_live_text.clear();
+                        current_generation += 1;
+                        let _ = std::fs::remove_file(audio::RECORDING_WAV_PATH);
+                        let _ = std::fs::remove_file(audio::RECORDING_WAV_COPY);
                     }
                     ClientCommand::Stop => {
                         let mut state = current_state.lock().await;
